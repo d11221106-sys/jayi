@@ -232,7 +232,6 @@
 </div>
 
 <script>
-    // 已幫您填入最新專屬雲端網址，並對齊中文試算表欄位！
     const API_URL = "https://script.google.com/macros/s/AKfycbyi-n6aOErOZipDoptgdcbTW4ibQ2tZqDuobbg5NigLb37uHkmSqglKybsvMXVrkmOL/exec";
 
     const baseInput = document.getElementById('base');
@@ -247,7 +246,6 @@
 
     function showLoading(show) { loadingMask.style.display = show ? 'flex' : 'none'; }
 
-    // 格式化時間為台灣人秒懂的 12 小時制不帶上下午字樣（例如 00:55 變 12:55）
     function convertTo12HourStr(dateObj) {
         const m = String(dateObj.getMonth() + 1).padStart(2, '0');
         const date = String(dateObj.getDate()).padStart(2, '0');
@@ -284,6 +282,8 @@
             historyData = await response.json();
         } catch (e) {
             console.error("雲端載入失敗", e);
+            // 就算失敗也建立空的陣列，絕對不卡死排版與輸入框
+            if(!historyData) historyData = [];
         }
         showLoading(false);
         renderMonths();
@@ -320,21 +320,21 @@
     function renderMonths() {
         monthContainer.innerHTML = '';
         if (!historyData || historyData.length === 0) {
-            monthContainer.innerHTML = '<div class="empty-tips">雲端目前沒有資料，請在上方輸入第一筆紀錄吧！</div>';
+            monthContainer.innerHTML = '<div class="empty-tips">雲端目前沒有歷史資料，可以嘗試在上方輸入第一筆紀錄！</div>';
             return;
         }
 
         const rawBase = parseFloat(baseInput.value) || 0;
         const rate = parseFloat(rateInput.value) || 0;
-        const floorBase = Math.floor(rawBase);
 
         const groups = {};
         historyData.forEach((item) => {
+            if(!item || !item.periodKey) return;
             const groupKey = item.periodKey; 
             if (!groups[groupKey]) {
                 groups[groupKey] = {
-                    displayName: item.periodName,
-                    durationText: item.periodDuration,
+                    displayName: item.periodName || "未命名帳期",
+                    durationText: item.periodDuration || "",
                     startTimestamp: item.startTimestamp || 0,
                     endTimestamp: item.endTimestamp || 0,
                     items: []
@@ -344,6 +344,10 @@
         });
 
         const sortedPeriods = Object.keys(groups).sort().reverse();
+        if (sortedPeriods.length === 0) {
+            monthContainer.innerHTML = '<div class="empty-tips">雲端目前沒有歷史資料，可以嘗試在上方輸入第一筆紀錄！</div>';
+            return;
+        }
 
         sortedPeriods.forEach(periodKey => {
             const periodGroup = groups[periodKey];
@@ -355,7 +359,7 @@
             const maxCurrentInPeriodRaw = Math.max(...periodItems.map(i => parseFloat(i.current) || 0));
             const floorMaxCurrent = Math.floor(maxCurrentInPeriodRaw);
             
-            let usedDegrees = floorMaxCurrent - floorBase;
+            let usedDegrees = floorMaxCurrent - Math.floor(rawBase);
             if (usedDegrees < 0) usedDegrees = 0;
             const totalCost = Math.round(usedDegrees * rate);
 
@@ -456,7 +460,7 @@
             await fetch(API_URL, { method: "POST", body: JSON.stringify(newRecord) });
             currentInput.value = '';
             await loadData();
-        } catch(e) { alert("雲端同步失敗"); showLoading(false); }
+        } catch(e) { alert("雲端同步失敗，但請檢查您的 Apps Script 狀態"); showLoading(false); }
     });
 
     [baseInput, rateInput].forEach(input => {
@@ -466,17 +470,16 @@
     exportBtn.addEventListener('click', () => {
         if (!historyData || historyData.length === 0) { alert('目前還沒有任何記錄可以匯出唷！'); return; }
         const rawBase = parseFloat(baseInput.value) || 0;
-        const floorBase = Math.floor(rawBase);
         const rate = parseFloat(rateInput.value) || 0;
 
         let csvContent = "結算帳期,記帳時間,當前輸入度數(含小數),初始底數(含小數),計費單價,當期結算度數(整數捨去),當期結算金額\n";
         historyData.forEach(item => {
+            if(!item) return;
             const currentValRaw = parseFloat(item.current) || 0;
-            const floorCurrent = Math.floor(currentValRaw);
-            let usedDegrees = floorCurrent - floorBase;
+            let usedDegrees = Math.floor(currentValRaw) - Math.floor(rawBase);
             if (usedDegrees < 0) usedDegrees = 0;
             const cost = Math.round(usedDegrees * rate);
-            csvContent += `"${item.periodName}","${formatTimeStr(item.time)}",${currentValRaw},${rawBase},${rate},${usedDegrees},${cost}\n`;
+            csvContent += `"${item.periodName || ''}","${formatTimeStr(item.time)}",${currentValRaw},${rawBase},${rate},${usedDegrees},${cost}\n`;
         });
 
         const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
