@@ -206,3 +206,289 @@
             <label for="rate">每度電費 (元)</label>
             <input type="number" id="rate" step="0.1" value="5">
         </div>
+    </div>
+
+    <div class="section-title-container">
+        <div class="section-title">✍️ 紀錄今天度數</div>
+    </div>
+    <div class="card">
+        <div class="form-group">
+            <label for="current">目前看到的電表度數</label>
+            <input type="number" id="current" step="0.1" placeholder="填入含小數點的數字">
+        </div>
+        <button class="btn" id="addRecordBtn">🍮 記錄並同步雲端</button>
+    </div>
+
+    <div class="section-title-container">
+        <div class="section-title">📅 結算帳本 (15日結)</div>
+        <button class="btn-export" id="exportBtn">🍮 匯出 Excel</button>
+    </div>
+    <div id="monthContainer"></div>
+
+    <div class="footer-tip">
+        本版本已連線至您的 Google 雲端試算表！<br>
+        手機與電腦打開同個網址，資料完全同步 🐾
+    </div>
+</div>
+
+<script>
+    // 已幫您填入最新專屬雲端網址，並對齊中文試算表欄位！
+    const API_URL = "https://script.google.com/macros/s/AKfycbyi-n6aOErOZipDoptgdcbTW4ibQ2tZqDuobbg5NigLb37uHkmSqglKybsvMXVrkmOL/exec";
+
+    const baseInput = document.getElementById('base');
+    const rateInput = document.getElementById('rate');
+    const currentInput = document.getElementById('current');
+    const addRecordBtn = document.getElementById('addRecordBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const monthContainer = document.getElementById('monthContainer');
+    const loadingMask = document.getElementById('loadingMask');
+
+    let historyData = [];
+
+    function showLoading(show) { loadingMask.style.display = show ? 'flex' : 'none'; }
+
+    // 格式化時間為台灣人秒懂的 12 小時制不帶上下午字樣（例如 00:55 變 12:55）
+    function convertTo12HourStr(dateObj) {
+        const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const date = String(dateObj.getDate()).padStart(2, '0');
+        let hours = dateObj.getHours();
+        const min = String(dateObj.getMinutes()).padStart(2, '0');
+        
+        if (hours === 0) {
+            hours = 12;
+        } else if (hours > 12) {
+            hours = hours - 12;
+        }
+        const h = String(hours).padStart(2, '0');
+        return `${m}/${date} ${h}:${min}`;
+    }
+
+    function formatTimeStr(rawTime) {
+        if (!rawTime) return "";
+        try {
+            const d = new Date(rawTime);
+            if (!isNaN(d.getTime())) {
+                return convertTo12HourStr(d);
+            }
+        } catch(e) {}
+        return String(rawTime);
+    }
+
+    async function loadData() {
+        if (localStorage.getItem('rent_cute_base')) baseInput.value = localStorage.getItem('rent_cute_base');
+        if (localStorage.getItem('rent_cute_rate')) rateInput.value = localStorage.getItem('rent_cute_rate');
+        
+        showLoading(true);
+        try {
+            const response = await fetch(API_URL);
+            historyData = await response.json();
+        } catch (e) {
+            console.error("雲端載入失敗", e);
+        }
+        showLoading(false);
+        renderMonths();
+    }
+
+    function saveSettingsLocal() {
+        localStorage.setItem('rent_cute_base', baseInput.value || 0);
+        localStorage.setItem('rent_cute_rate', rateInput.value || 0);
+    }
+
+    function getBillingPeriod(dateObj) {
+        let year = dateObj.getFullYear();
+        let month = dateObj.getMonth() + 1; 
+        const date = dateObj.getDate();
+
+        if (date > 15) {
+            month += 1;
+            if (month > 12) { month = 1; year += 1; }
+        }
+        const paddedMonth = String(month).padStart(2, '0');
+        let startMonth = month - 1;
+        let startYear = year;
+        if (startMonth === 0) { startMonth = 12; startYear -= 1; }
+        
+        return {
+            key: `${year}-${paddedMonth}`,
+            displayName: `${month}月結算期`,
+            durationText: `${startMonth}/16~${month}/15`,
+            startTimestamp: new Date(startYear, startMonth - 1, 16, 0, 0, 0).getTime(),
+            endTimestamp: new Date(year, month - 1, 15, 23, 59, 59).getTime()
+        };
+    }
+
+    function renderMonths() {
+        monthContainer.innerHTML = '';
+        if (!historyData || historyData.length === 0) {
+            monthContainer.innerHTML = '<div class="empty-tips">雲端目前沒有資料，請在上方輸入第一筆紀錄吧！</div>';
+            return;
+        }
+
+        const rawBase = parseFloat(baseInput.value) || 0;
+        const rate = parseFloat(rateInput.value) || 0;
+        const floorBase = Math.floor(rawBase);
+
+        const groups = {};
+        historyData.forEach((item) => {
+            const groupKey = item.periodKey; 
+            if (!groups[groupKey]) {
+                groups[groupKey] = {
+                    displayName: item.periodName,
+                    durationText: item.periodDuration,
+                    startTimestamp: item.startTimestamp || 0,
+                    endTimestamp: item.endTimestamp || 0,
+                    items: []
+                };
+            }
+            groups[groupKey].items.push(item);
+        });
+
+        const sortedPeriods = Object.keys(groups).sort().reverse();
+
+        sortedPeriods.forEach(periodKey => {
+            const periodGroup = groups[periodKey];
+            const periodItems = periodGroup.items;
+            
+            const monthBox = document.createElement('div');
+            monthBox.className = 'month-box';
+
+            const maxCurrentInPeriodRaw = Math.max(...periodItems.map(i => parseFloat(i.current) || 0));
+            const floorMaxCurrent = Math.floor(maxCurrentInPeriodRaw);
+            
+            let usedDegrees = floorMaxCurrent - floorBase;
+            if (usedDegrees < 0) usedDegrees = 0;
+            const totalCost = Math.round(usedDegrees * rate);
+
+            let daysElapsed = 1; 
+            if (periodGroup.startTimestamp) {
+                const latestItemTime = Math.max(...periodItems.map(i => i.timestamp || new Date().getTime()));
+                const diffTime = latestItemTime - periodGroup.startTimestamp;
+                const calculatedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                const totalPeriodDays = Math.ceil((periodGroup.endTimestamp - periodGroup.startTimestamp) / (1000 * 60 * 60 * 24));
+                daysElapsed = Math.max(1, Math.min(calculatedDays, totalPeriodDays));
+            }
+            const avgDailyCost = (totalCost / daysElapsed).toFixed(1);
+
+            monthBox.innerHTML = `
+                <div class="month-header">
+                    <div class="month-name">
+                        ${periodGroup.displayName}
+                        <span style="font-size:10px; font-weight:normal; display:block; color:var(--text-muted); margin-top:1px;">
+                            ${periodGroup.durationText}
+                        </span>
+                    </div>
+                    <div class="month-summary">
+                        累積: <span>${usedDegrees} 度</span><br>
+                        金額: <span class="month-total-cost">NT$ ${totalCost.toLocaleString()}</span>
+                    </div>
+                </div>
+                <div class="month-stats-bar">
+                    <div>📊 已計：<span class="stats-val">${daysElapsed}</span> 天</div>
+                    <div>⚡ 日均：<span class="stats-val">$${avgDailyCost}</span> 元</div>
+                </div>
+                <div class="month-items-list"></div>
+            `;
+
+            const listContainer = monthBox.querySelector('.month-items-list');
+
+            [...periodItems].reverse().forEach(item => {
+                const itemCurRaw = parseFloat(item.current) || 0;
+                let itemDegRaw = itemCurRaw - rawBase;
+                if (itemDegRaw < 0) itemDegRaw = 0;
+                const itemCostRaw = (itemDegRaw * rate).toFixed(1);
+
+                const itemEl = document.createElement('div');
+                itemEl.className = 'history-item';
+                itemEl.innerHTML = `
+                    <div class="item-left">
+                        <div class="item-degree">⏱️ ${itemCurRaw} 度</div>
+                        <div class="item-time">${formatTimeStr(item.time)}</div>
+                    </div>
+                    <div class="item-right">
+                        <div class="item-cost">NT$ ${itemCostRaw}</div>
+                        <button class="btn-delete" data-ts="${item.timestamp}">✕</button>
+                    </div>
+                `;
+                listContainer.appendChild(itemEl);
+            });
+
+            monthContainer.appendChild(monthBox);
+        });
+
+        document.querySelectorAll('.btn-delete').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const ts = this.getAttribute('data-ts');
+                if(confirm('確定要刪除這筆紀錄嗎？(雲端也會同步刪除)')) {
+                    showLoading(true);
+                    try {
+                        await fetch(API_URL, {
+                            method: "POST",
+                            body: JSON.stringify({ action: "delete", timestamp: ts })
+                        });
+                        await loadData();
+                    } catch(e) { alert("刪除失敗"); showLoading(false); }
+                }
+            });
+        });
+    }
+
+    addRecordBtn.addEventListener('click', async () => {
+        const currentVal = parseFloat(currentInput.value);
+        if (isNaN(currentVal)) { alert('要填入數字才能幫你算唷！'); return; }
+
+        showLoading(true);
+        const now = new Date();
+        const periodInfo = getBillingPeriod(now);
+
+        const newRecord = {
+            action: "add",
+            periodKey: periodInfo.key,
+            periodName: periodInfo.displayName,
+            periodDuration: periodInfo.durationText,
+            startTimestamp: periodInfo.startTimestamp,
+            endTimestamp: periodInfo.endTimestamp,
+            timestamp: now.getTime(),
+            time: now.toISOString(),
+            current: currentVal
+        };
+
+        try {
+            await fetch(API_URL, { method: "POST", body: JSON.stringify(newRecord) });
+            currentInput.value = '';
+            await loadData();
+        } catch(e) { alert("雲端同步失敗"); showLoading(false); }
+    });
+
+    [baseInput, rateInput].forEach(input => {
+        input.addEventListener('input', () => { saveSettingsLocal(); renderMonths(); });
+    });
+
+    exportBtn.addEventListener('click', () => {
+        if (!historyData || historyData.length === 0) { alert('目前還沒有任何記錄可以匯出唷！'); return; }
+        const rawBase = parseFloat(baseInput.value) || 0;
+        const floorBase = Math.floor(rawBase);
+        const rate = parseFloat(rateInput.value) || 0;
+
+        let csvContent = "結算帳期,記帳時間,當前輸入度數(含小數),初始底數(含小數),計費單價,當期結算度數(整數捨去),當期結算金額\n";
+        historyData.forEach(item => {
+            const currentValRaw = parseFloat(item.current) || 0;
+            const floorCurrent = Math.floor(currentValRaw);
+            let usedDegrees = floorCurrent - floorBase;
+            if (usedDegrees < 0) usedDegrees = 0;
+            const cost = Math.round(usedDegrees * rate);
+            csvContent += `"${item.periodName}","${formatTimeStr(item.time)}",${currentValRaw},${rawBase},${rate},${usedDegrees},${cost}\n`;
+        });
+
+        const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", `租屋電費雲端備份.csv`);
+        link.click();
+    });
+
+    loadData();
+</script>
+
+</body>
+</html>
