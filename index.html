@@ -44,7 +44,6 @@
             position: relative;
         }
 
-        /* 載入中遮罩 */
         .loading-mask {
             display: none;
             position: absolute;
@@ -233,7 +232,7 @@
 </div>
 
 <script>
-    // ⚠️ 已自動幫您填入您的專屬雲端網址
+    // 您的專屬雲端網址已自動填入
     const API_URL = "https://script.google.com/macros/s/AKfycbyi-n6aOErOZipDoptgdcbTW4ibQ2tZqDuobbg5NigLb37uHkmSqglKybsvMXVrkmOL/exec";
 
     const baseInput = document.getElementById('base');
@@ -247,6 +246,25 @@
     let historyData = [];
 
     function showLoading(show) { loadingMask.style.display = show ? 'flex' : 'none'; }
+
+    // 用來美化時間格式的輔助函式
+    function formatTimeStr(rawTime) {
+        if (!rawTime) return "";
+        // 如果原本就是格式化好的字串（例如 "06/22 0:55"），就直接返回
+        if (typeof rawTime === 'string' && rawTime.includes('/')) return rawTime;
+        
+        try {
+            const d = new Date(rawTime);
+            if (isNaN(d.getTime())) return String(rawTime);
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const date = String(d.getDate()).padStart(2, '0');
+            const h = String(d.getHours()).padStart(2, '0');
+            const min = String(d.getMinutes()).padStart(2, '0');
+            return `${m}/${date} ${h}:${min}`;
+        } catch(e) {
+            return String(rawTime);
+        }
+    }
 
     async function loadData() {
         if (localStorage.getItem('rent_cute_base')) baseInput.value = localStorage.getItem('rent_cute_base');
@@ -378,7 +396,7 @@
                 itemEl.innerHTML = `
                     <div class="item-left">
                         <div class="item-degree">⏱️ ${itemCurRaw} 度</div>
-                        <div class="item-time">${item.time}</div>
+                        <div class="item-time">${formatTimeStr(item.time)}</div>
                     </div>
                     <div class="item-right">
                         <div class="item-cost">NT$ ${itemCostRaw}</div>
@@ -422,53 +440,3 @@
 
         const newRecord = {
             action: "add",
-            periodKey: periodInfo.key,
-            periodName: periodInfo.displayName,
-            periodDuration: periodInfo.durationText,
-            startTimestamp: periodInfo.startTimestamp,
-            endTimestamp: periodInfo.endTimestamp,
-            timestamp: now.getTime(),
-            time: `${month}/${date} ${hours}:${minutes}`,
-            current: currentVal
-        };
-
-        try {
-            await fetch(API_URL, { method: "POST", body: JSON.stringify(newRecord) });
-            currentInput.value = '';
-            await loadData();
-        } catch(e) { alert("雲端同步失敗，請檢查 API 設定或網路"); showLoading(false); }
-    });
-
-    [baseInput, rateInput].forEach(input => {
-        input.addEventListener('input', () => { saveSettingsLocal(); renderMonths(); });
-    });
-
-    exportBtn.addEventListener('click', () => {
-        if (historyData.length === 0) { alert('目前還沒有任何記錄可以匯出唷！'); return; }
-        const rawBase = parseFloat(baseInput.value) || 0;
-        const floorBase = Math.floor(rawBase);
-        const rate = parseFloat(rateInput.value) || 0;
-
-        let csvContent = "結算帳期,記帳時間,當前輸入度數(含小數),初始底數(含小數),計費單價,當期結算度數(整數捨去),當期結算金額\n";
-        historyData.forEach(item => {
-            const currentValRaw = parseFloat(item.current) || 0;
-            const floorCurrent = Math.floor(currentValRaw);
-            let usedDegrees = floorCurrent - floorBase;
-            if (usedDegrees < 0) usedDegrees = 0;
-            const cost = Math.round(usedDegrees * rate);
-            csvContent += `"${item.periodName}","${item.time}",${currentValRaw},${rawBase},${rate},${usedDegrees},${cost}\n`;
-        });
-
-        const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
-        const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", `租屋電費雲端備份.csv`);
-        link.click();
-    });
-
-    loadData();
-</script>
-
-</body>
-</html>
