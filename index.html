@@ -233,8 +233,8 @@
 </div>
 
 <script>
-    // ⚠️ 請把下方引號內的網址，換成你剛在 Apps Script 複製的「網頁應用程式 URL」
-    const API_URL = "請把剛剛複製的網頁應用程式URL貼在這裡";
+    // ⚠️ 已自動幫您填入您的專屬雲端網址
+    const API_URL = "https://script.google.com/macros/s/AKfycbyi-n6aOErOZipDoptgdcbTW4ibQ2tZqDuobbg5NigLb37uHkmSqglKybsvMXVrkmOL/exec";
 
     const baseInput = document.getElementById('base');
     const rateInput = document.getElementById('rate');
@@ -367,7 +367,6 @@
 
             const listContainer = monthBox.querySelector('.month-items-list');
 
-            // 複製一份來反轉顯示，才不會影響原始排序
             [...periodItems].reverse().forEach(item => {
                 const itemCurRaw = parseFloat(item.current) || 0;
                 let itemDegRaw = itemCurRaw - rawBase;
